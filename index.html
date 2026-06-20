@@ -67,6 +67,36 @@
   }
   #startBtn:hover { transform: scale(1.06); }
   .hint { margin-top: 18px; font-size: 13px; opacity: .65; max-width: 520px; line-height: 1.5; }
+  /* ---- Входящий звонок от Андрея ---- */
+  #callCard{
+    position:absolute; top:92px; left:50%;
+    transform:translateX(-50%) translateY(-40px) scale(.95);
+    width:262px; max-width:84vw;
+    background:linear-gradient(165deg,#1d2c3c,#0d1622);
+    border:1px solid rgba(120,180,255,.35); border-radius:22px;
+    padding:18px 18px 16px; color:#eaf2ff; text-align:center; z-index:18;
+    opacity:0; pointer-events:none; box-shadow:0 20px 55px rgba(0,0,0,.55);
+    transition:opacity .25s, transform .25s;
+  }
+  #callCard.show{ opacity:1; transform:translateX(-50%) translateY(0) scale(1); pointer-events:auto;
+    animation:ringShake .55s ease-in-out infinite; }
+  @keyframes ringShake{
+    0%,100%{transform:translateX(-50%) translateY(0) rotate(0deg)}
+    25%{transform:translateX(-50%) translateY(0) rotate(-1.6deg)}
+    75%{transform:translateX(-50%) translateY(0) rotate(1.6deg)} }
+  .caller-avatar{ font-size:38px; width:66px; height:66px; line-height:66px;
+    margin:0 auto 6px; border-radius:50%; background:rgba(120,180,255,.16);
+    border:2px solid rgba(120,180,255,.3); }
+  .caller-name{ font-size:21px; font-weight:700; letter-spacing:.3px; }
+  .caller-sub{ font-size:12px; opacity:.65; margin-bottom:15px; }
+  .call-actions{ display:flex; justify-content:center; gap:34px; }
+  .call-btn{ width:54px; height:54px; border-radius:50%; border:none; cursor:pointer;
+    font-size:23px; color:#fff; transition:transform .1s; box-shadow:0 6px 18px rgba(0,0,0,.4); }
+  .call-btn:active{ transform:scale(.9); }
+  .call-btn.decline{ background:#e3403a; }
+  .call-btn.accept{ background:#2ec27a; animation:jiggle 1s ease-in-out infinite; }
+  @keyframes jiggle{ 0%,100%{transform:translateY(0)} 50%{transform:translateY(-4px)} }
+
   .hidden { display: none !important; }
   .toast {
     position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
@@ -136,7 +166,7 @@
   <div class="hud">
     <div class="panel">
       <div class="big">🐑 Загон: <b><span id="penned">0</span>/<span id="total">50</span></b></div>
-      <div>⏱ Время: <b><span id="timer">0.0</span>с</b> &nbsp; 💩 Наташа в навозе: <b><span id="poopCount">0</span></b></div>
+      <div>⏱ Время: <b><span id="timer">0.0</span>с</b> &nbsp; 🤕 Наташа падала: <b><span id="poopCount">0</span></b></div>
       <div id="goalbar"><div id="goalfill"></div></div>
     </div>
     <div class="panel mode" style="text-align:right">
@@ -154,6 +184,16 @@
   </div>
 
   <div id="rotateHint">📱➡️ Поверни телефон для удобства</div>
+
+  <div id="callCard">
+    <div class="caller-avatar">🧔‍♂️</div>
+    <div class="caller-name">Андрей</div>
+    <div class="caller-sub">мобильный · входящий вызов…</div>
+    <div class="call-actions">
+      <button class="call-btn decline" id="callDecline" title="Сбросить">✕</button>
+      <button class="call-btn accept" id="callAccept" title="Ответить">✆</button>
+    </div>
+  </div>
 
   <div class="toast" id="toast"></div>
 
@@ -198,6 +238,11 @@ function penRect(){
   const h = Math.max(160, Math.min(300, H*0.42));
   return { x: W - w - 24, y: H/2 - h/2, w: w, h: h };
 }
+// Тренерский домик — декоративная постройка слева
+function hutRect(){
+  const w = Math.max(64, Math.min(104, W*0.11));
+  return { x: Math.max(16, W*0.05), y: H*0.6, w: w, h: w*0.9 };
+}
 
 // ===================== ЗВУК (Web Audio) =====================
 let actx = null, soundOn = true, master = null;
@@ -235,6 +280,11 @@ function sBark(){ tone(180,0.08,'square',0.4,90); setTimeout(()=>noise(0.06,0.25
 function sSplat(){ noise(0.25,0.45,600); tone(120,0.2,'sine',0.25,60); } // плюх в навоз
 function sWin(){ [523,659,784,1046].forEach((f,i)=>setTimeout(()=>tone(f,0.3,'triangle',0.3),i*120)); }
 function sWhistle(){ tone(900,0.15,'sine',0.2,1400); }
+function sCrash(){ noise(0.3,0.5,1300); tone(150,0.25,'square',0.3,60); setTimeout(()=>noise(0.16,0.3,900),80); } // забор упал
+function sThud(){ tone(90,0.22,'sine',0.35,50); noise(0.13,0.28,500); } // повалили овцы
+function sShoo(){ noise(0.18,0.22,2600); tone(440,0.12,'square',0.13,300); } // Володя шикает на овец
+function sRing(){ tone(800,0.4,'sine',0.16); setTimeout(()=>tone(1000,0.4,'sine',0.16),190); } // гудок звонка
+function sDecline(){ tone(420,0.12,'square',0.2,210); setTimeout(()=>tone(200,0.2,'square',0.2,120),110); } // сброс
 
 // ===================== СУЩНОСТИ =====================
 function rnd(a,b){ return a+Math.random()*(b-a); }
@@ -313,6 +363,24 @@ class Sheep {
     // Границы поля
     if(this.x<this.r) ax+=80; if(this.x>W-this.r) ax-=80;
     if(this.y<this.r+10) ay+=80; if(this.y>H-this.r-10) ay-=80;
+
+    // Обход тренерского домика
+    const ht=hutRect(), hcx=ht.x+ht.w/2, hcy=ht.y+ht.h*0.7;
+    if(this.x>ht.x-22 && this.x<ht.x+ht.w+22 && this.y>ht.y-10 && this.y<ht.y+ht.h+22){
+      let dx=this.x-hcx, dy=this.y-hcy; const d=Math.hypot(dx,dy)||1;
+      ax += dx/d*220; ay += dy/d*220;
+    }
+
+    // Володя раздвигает руками и пугает овец
+    for(const f of farmers){
+      if(f.name==='Володя' && f.scaring>0){
+        const d=dist(this.x,this.y,f.x,f.y);
+        if(d<170 && d>0){ const force=(170-d)/170;
+          ax += (this.x-f.x)/d*force*230; ay += (this.y-f.y)/d*force*230;
+          this.fright=Math.min(1,this.fright+force*dt*3);
+        }
+      }
+    }
 
     this.vx += ax*dt; this.vy += ay*dt;
     const sp = Math.hypot(this.vx,this.vy);
@@ -434,30 +502,67 @@ class Farmer {
     this.name=name; this.x=x; this.y=y; this.color=color;
     this.tx=x; this.ty=y; this.fallen=0; this.dirty=0; this.phase=Math.random()*6; this.face=1;
     this.wander = rnd(2,5);
+    this.fallReason='poop';
+    this.smokeT = rnd(0.5,1.3);       // Володя: таймер затяжки
+    this.scaring = 0;                  // Володя: фаза «раздвигания рук»
+    this.scareCD = rnd(3.5,7);         // Володя: кулдаун пугания
+    this.fenceTimer = rnd(11,20);      // Наташа: таймер похода к забору
+    this.goingFence = false;
   }
   update(dt){
     this.wander-=dt;
-    if(this.wander<=0 && this.fallen<=0){
-      this.tx = rnd(W*0.15,W*0.6); this.ty=rnd(H*0.2,H*0.85); this.wander=rnd(3,7);
+    if(this.wander<=0 && this.fallen<=0 && !this.goingFence){
+      this.tx = rnd(W*0.12,W*0.6); this.ty=rnd(H*0.2,H*0.85); this.wander=rnd(3,7);
     }
-    if(this.fallen>0){ this.fallen-=dt; this.phase+=dt*8; return; }
+    if(this.fallen>0){ this.fallen-=dt; this.phase+=dt*8; if(this.fallen<=0) this.fallReason='poop'; return; }
     const dx=this.tx-this.x, dy=this.ty-this.y, d=Math.hypot(dx,dy);
-    if(d>6){ this.x+=dx/d*45*dt; this.y+=dy/d*45*dt; this.phase+=dt*6; if(Math.abs(dx)>1)this.face=dx>0?1:-1; }
-    // Наташа: проверка падения в навоз
+    const spd = this.goingFence ? 70 : 45;
+    if(d>6){ this.x+=dx/d*spd*dt; this.y+=dy/d*spd*dt; this.phase+=dt*6; if(Math.abs(dx)>1)this.face=dx>0?1:-1; }
+
+    if(this.name==='Володя'){
+      // нервно курит — дымок над головой
+      this.smokeT -= dt;
+      if(this.smokeT<=0){ spawnSmoke(this.x+this.face*7, this.y-26); this.smokeT=rnd(0.5,1.1); }
+      // периодически раздвигает руки и распугивает овец
+      this.scareCD -= dt;
+      if(this.scareCD<=0){ this.scaring=0.8; this.scareCD=rnd(3.5,7); sShoo();
+        for(let i=0;i<10;i++) spawnDust(this.x+rnd(-16,16), this.y+10);
+        ring.push({x:this.x,y:this.y,r:8,max:175,life:0.9});
+      }
+      if(this.scaring>0) this.scaring-=dt;
+    }
+
     if(this.name==='Наташа'){
-      for(const p of poops){
-        if(!p.stepped && dist(this.x,this.y+18,p.x,p.y)<14){
-          p.stepped=true; this.fall(); break;
+      // 1) поход к забору и придавливание
+      this.fenceTimer -= dt;
+      if(this.fenceTimer<=0 && !this.goingFence){
+        const pen=penRect(); this.tx=pen.x-16; this.ty=pen.y+rnd(20,pen.h-20);
+        this.goingFence=true; this.wander=99;
+      }
+      if(this.goingFence){
+        if(dist(this.x,this.y,this.tx,this.ty)<16){
+          this.fall('fence'); this.goingFence=false; this.fenceTimer=rnd(16,28); this.wander=rnd(2,5);
         }
       }
-      // ещё может упасть, если рядом пробежало стадо (паника)
+      // 2) повалили овцы (если рядом сбилось стадо)
+      let near=0; for(const s of sheep){ if(!s.penned && dist(this.x,this.y,s.x,s.y)<34) near++; }
+      if(near>=5 && Math.random()<dt*0.7) this.fall('sheep');
+      // 3) падение в навоз
+      for(const p of poops){
+        if(!p.stepped && dist(this.x,this.y+18,p.x,p.y)<14){ p.stepped=true; this.fall('poop'); break; }
+      }
     }
   }
-  fall(){
+  fall(reason){
     if(this.fallen>0) return;
-    this.fallen=2.2; this.dirty=Math.min(3,this.dirty+1); poopCount++; updateHUD();
-    sSplat(); showToast('💩 Наташа упала в навоз! 🙀');
-    for(let i=0;i<18;i++) confetti.push(new Particle(this.x,this.y+15,'#6b4a1a'));
+    this.fallReason = reason||'poop';
+    this.fallen = reason==='fence' ? 2.6 : 2.2;
+    this.dirty=Math.min(3,this.dirty+1); poopCount++; updateHUD();
+    let col='#6b4a1a';
+    if(reason==='fence'){ sCrash(); showToast('🚧 Наташу придавило забором! 😵'); col='#9a6a3a'; }
+    else if(reason==='sheep'){ sThud(); showToast('🐑 Наташу повалили овцы! 😩'); col='#f4f4ee'; }
+    else { sSplat(); showToast('💩 Наташа упала в навоз! 🙀'); }
+    for(let i=0;i<18;i++) confetti.push(new Particle(this.x,this.y+15,col));
   }
   draw(){
     ctx.save(); ctx.translate(this.x,this.y);
@@ -480,9 +585,15 @@ class Farmer {
     ctx.roundRect ? ctx.roundRect(-9,-6,18,22,6) : ctx.rect(-9,-6,18,22); ctx.fill();
     // руки
     ctx.strokeStyle=this.color; ctx.lineWidth=5;
-    const armK = this.fallen>0 ? Math.cos(this.phase)*9 : Math.sin(this.phase+1)*4;
-    ctx.beginPath(); ctx.moveTo(-8,-2); ctx.lineTo(-15,4+armK); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(8,-2); ctx.lineTo(15,4-armK); ctx.stroke();
+    if(this.name==='Володя' && this.scaring>0 && this.fallen<=0){
+      // раздвинул руки — пугает овец
+      ctx.beginPath(); ctx.moveTo(-8,-2); ctx.lineTo(-23,-9); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(8,-2); ctx.lineTo(23,-9); ctx.stroke();
+    } else {
+      const armK = this.fallen>0 ? Math.cos(this.phase)*9 : Math.sin(this.phase+1)*4;
+      ctx.beginPath(); ctx.moveTo(-8,-2); ctx.lineTo(-15,4+armK); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(8,-2); ctx.lineTo(15,4-armK); ctx.stroke();
+    }
     // голова
     ctx.fillStyle='#f0c8a0'; ctx.beginPath(); ctx.arc(0,-16,10,0,7); ctx.fill();
     // волосы
@@ -509,7 +620,25 @@ class Farmer {
       ctx.fillStyle='rgba(90,60,20,.7)';
       for(let i=0;i<this.dirty*2;i++){ ctx.beginPath(); ctx.arc(rnd(-8,8),rnd(-4,14),rnd(1.5,3),0,7); ctx.fill(); }
     }
+    // сигарета Володи (нервно курит)
+    if(this.name==='Володя' && this.fallen<=0){
+      ctx.strokeStyle='#fff'; ctx.lineWidth=2; ctx.lineCap='butt';
+      ctx.beginPath(); ctx.moveTo(this.face*7,-13); ctx.lineTo(this.face*13,-13); ctx.stroke();
+      ctx.fillStyle='#ff6a3a'; ctx.beginPath(); ctx.arc(this.face*13,-13,1.7,0,7); ctx.fill();
+    }
     ctx.restore();
+    // оверлеи поверх лежащей Наташи
+    if(this.fallen>0 && this.fallReason==='fence'){
+      ctx.save(); ctx.translate(this.x,this.y+6); ctx.rotate(0.18);
+      ctx.fillStyle='#8a5a2a'; ctx.fillRect(-28,-5,56,9);
+      ctx.strokeStyle='#6a3f18'; ctx.lineWidth=1.5; ctx.strokeRect(-28,-5,56,9);
+      ctx.fillStyle='rgba(255,255,255,.15)'; ctx.fillRect(-28,-5,56,3);
+      ctx.restore();
+    } else if(this.fallen>0 && this.fallReason==='sheep'){
+      ctx.fillStyle='#f4f4ee';
+      for(let i=0;i<3;i++){ ctx.beginPath(); ctx.arc(this.x-13+i*13, this.y+5, 9,0,7); ctx.fill(); }
+      ctx.fillStyle='#2b2b2b'; ctx.beginPath(); ctx.arc(this.x+13,this.y+3,3.5,0,7); ctx.fill();
+    }
     // имя
     ctx.fillStyle='rgba(255,255,255,.85)'; ctx.font='bold 12px Segoe UI'; ctx.textAlign='center';
     ctx.fillText(this.name + (this.fallen>0?' 😵':''), this.x, this.y-30);
@@ -548,6 +677,7 @@ class Particle {
     ctx.beginPath(); ctx.arc(this.x,this.y,this.r,0,7); ctx.fill(); ctx.globalAlpha=1; }
 }
 function spawnDust(x,y){ for(let i=0;i<3;i++){ const p=new Particle(x,y,'rgba(200,190,160,0.8)'); p.vy=rnd(-40,0); p.g=120; confetti.push(p);} }
+function spawnSmoke(x,y){ const p=new Particle(x,y,'rgba(205,205,205,0.5)'); p.vx=rnd(-10,10); p.vy=rnd(-26,-12); p.g=-18; p.r=rnd(3,5); p.life=1.3; confetti.push(p); }
 
 // ===================== МИР =====================
 let sheep=[], dog=null, farmers=[], poops=[], confetti=[], ring=[];
@@ -562,6 +692,7 @@ function initWorld(){
   ];
   poops=[]; confetti=[]; ring=[];
   penned=0; poopCount=0; startTime=performance.now(); elapsed=0;
+  resetCall();
   updateHUD();
 }
 
@@ -604,6 +735,36 @@ function drawBackground(){
   // надпись «ЗАГОН»
   ctx.save(); ctx.fillStyle='rgba(255,255,255,.9)'; ctx.font='bold 16px Segoe UI'; ctx.textAlign='center';
   ctx.translate(p.x+p.w/2,p.y-16); ctx.fillText('🏠 ЗАГОН', 0,0); ctx.restore();
+
+  // Тренерский домик (декор слева)
+  const ht=hutRect();
+  ctx.save();
+  ctx.fillStyle='rgba(0,0,0,.18)'; ctx.beginPath();
+  ctx.ellipse(ht.x+ht.w/2, ht.y+ht.h+4, ht.w*0.55, 8, 0,0,7); ctx.fill();
+  // стены (брёвна)
+  ctx.fillStyle='#c8a36a'; ctx.fillRect(ht.x, ht.y+ht.h*0.32, ht.w, ht.h*0.68);
+  ctx.strokeStyle='rgba(120,80,40,.4)'; ctx.lineWidth=1.5;
+  for(let i=1;i<5;i++){ const yy=ht.y+ht.h*0.32+i*(ht.h*0.68/5);
+    ctx.beginPath(); ctx.moveTo(ht.x,yy); ctx.lineTo(ht.x+ht.w,yy); ctx.stroke(); }
+  // крыша
+  ctx.fillStyle='#8a4a2a'; ctx.beginPath();
+  ctx.moveTo(ht.x-6, ht.y+ht.h*0.34); ctx.lineTo(ht.x+ht.w/2, ht.y-2);
+  ctx.lineTo(ht.x+ht.w+6, ht.y+ht.h*0.34); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='#6a3618'; ctx.fillRect(ht.x+ht.w/2-2, ht.y, 4, 6); // конёк
+  // окно
+  ctx.fillStyle='#bfe0ff'; ctx.fillRect(ht.x+ht.w*0.12, ht.y+ht.h*0.5, ht.w*0.22, ht.h*0.2);
+  ctx.strokeStyle='#6a4326'; ctx.lineWidth=1.5; ctx.strokeRect(ht.x+ht.w*0.12, ht.y+ht.h*0.5, ht.w*0.22, ht.h*0.2);
+  ctx.beginPath(); ctx.moveTo(ht.x+ht.w*0.23,ht.y+ht.h*0.5); ctx.lineTo(ht.x+ht.w*0.23,ht.y+ht.h*0.7); ctx.stroke();
+  // дверь
+  ctx.fillStyle='#6a4326'; ctx.fillRect(ht.x+ht.w*0.48, ht.y+ht.h*0.55, ht.w*0.24, ht.h*0.45);
+  ctx.fillStyle='#ffe28a'; ctx.beginPath(); ctx.arc(ht.x+ht.w*0.55, ht.y+ht.h*0.8, 1.6,0,7); ctx.fill();
+  // вывеска
+  const sw=ht.w*1.25, sx=ht.x+ht.w/2-sw/2, sy=ht.y-24;
+  ctx.fillStyle='rgba(40,30,15,.85)'; ctx.beginPath();
+  if(ctx.roundRect) ctx.roundRect(sx,sy,sw,18,5); else ctx.rect(sx,sy,sw,18); ctx.fill();
+  ctx.fillStyle='#ffe28a'; ctx.font='bold 10px Segoe UI'; ctx.textAlign='center';
+  ctx.fillText('🏋 Тренерский домик', ht.x+ht.w/2, sy+12);
+  ctx.restore();
 }
 
 // ===================== ЦИКЛ =====================
@@ -619,6 +780,7 @@ function loop(now){
     for(const s of sheep) s.update(dt, sheep, dog);
     for(const f of farmers) f.update(dt);
     poops.forEach(p=>p.age+=dt);
+    callTick(dt);
     document.getElementById('timer').textContent = elapsed.toFixed(1);
   }
 
@@ -711,6 +873,37 @@ window.addEventListener('keydown',e=>{
   else if(e.code==='Space'){ e.preventDefault(); if(dog)dog.bark(); }
 });
 
+// ===================== ЗВОНОК ОТ АНДРЕЯ =====================
+let callActive=false, callAuto=0, nextCallIn=14, ringIv=null;
+const callCard=document.getElementById('callCard');
+function callTick(dt){
+  if(!callActive){ nextCallIn-=dt; if(nextCallIn<=0) startCall(); }
+  else { callAuto-=dt; if(callAuto<=0) endCall('auto'); }
+}
+function startCall(){
+  callActive=true; callAuto=8.5;
+  callCard.classList.add('show');
+  if(actx && soundOn){ sRing(); ringIv=setInterval(()=>{ if(callActive) sRing(); else clearInterval(ringIv); }, 1400); }
+  if(navigator.vibrate) try{ navigator.vibrate([400,180,400,180,400]); }catch(e){}
+}
+function endCall(how){
+  if(!callActive) return; callActive=false;
+  if(ringIv){ clearInterval(ringIv); ringIv=null; }
+  if(navigator.vibrate) try{ navigator.vibrate(0); }catch(e){}
+  callCard.classList.remove('show');
+  nextCallIn = rnd(15,26);
+  if(how==='accept'){ showToast('📞 «Алло! Андрей, потом — я тут овец пасу!»'); }
+  else { sDecline(); showToast(how==='auto'?'📵 Андрей не дозвонился — сброс':'📵 Вызов от Андрея сброшен'); }
+}
+function resetCall(){
+  callActive=false; nextCallIn=rnd(10,16);
+  if(ringIv){ clearInterval(ringIv); ringIv=null; }
+  if(navigator.vibrate) try{ navigator.vibrate(0); }catch(e){}
+  callCard.classList.remove('show');
+}
+document.getElementById('callDecline').onclick=()=>endCall('decline');
+document.getElementById('callAccept').onclick=()=>endCall('accept');
+
 function startGame(){
   initAudio();
   document.getElementById('overlay').classList.add('hidden');
@@ -730,7 +923,7 @@ if(isTouch){
 }
 
 function win(){
-  state='win'; sWin();
+  state='win'; sWin(); resetCall();
   // фейерверк
   for(let k=0;k<60;k++) setTimeout(()=>{
     const x=rnd(W*0.2,W*0.8), y=rnd(H*0.2,H*0.5);
