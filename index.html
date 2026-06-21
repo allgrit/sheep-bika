@@ -165,8 +165,8 @@
 
   <div class="hud">
     <div class="panel">
-      <div class="big">🐑 Загон: <b><span id="penned">0</span>/<span id="total">50</span></b></div>
-      <div>⏱ Время: <b><span id="timer">0.0</span>с</b> &nbsp; 🤕 Наташа падала: <b><span id="poopCount">0</span></b></div>
+      <div class="big">🐑 Загон: <b><span id="penned">0</span>/<span id="total">18</span></b><span id="lostInfo" style="color:#ff9a9a"></span></div>
+      <div>📅 <b><span id="dayLabel">День 1</span></b> &nbsp; ⏱ <b><span id="timer">0.0</span>с</b> &nbsp; 🤕 <b><span id="poopCount">0</span></b></div>
       <div id="goalbar"><div id="goalfill"></div></div>
     </div>
     <div class="panel mode" style="text-align:right">
@@ -201,9 +201,10 @@
     <div class="emoji">🐑🐕</div>
     <h1>Бика пасёт овец</h1>
     <div class="sub">
-      Володя и Наташа держат ферму с <b>50 овцами</b>. Овцы разбрелись по полю!<br>
-      Управляй овчаркой <b>Бикой</b> — собери всё стадо в загон справа. 🏠<br>
-      Но осторожно: где овцы — там <b>💩</b>, и бедная Наташа то и дело падает прямо в навоз!
+      Ферма Володи и Наташи — <b>5 дней</b>, и с каждым днём всё жёстче. 🌅<br>
+      Управляй овчаркой <b>Бикой</b> — собирай стадо в загон справа. 🏠<br>
+      Берегись: <b>🐑‍⬛ овцы-бунтарки</b>, <b>🐺 волки</b> крадут овец, <b>🌊 лужи</b> и <b>🌳 кусты</b> мешают,
+      а Наташа всё так же падает в навоз!
     </div>
     <button id="startBtn">▶ Начать выпас</button>
     <div class="hint" id="startHint">
@@ -227,10 +228,19 @@ function resize(){
 }
 window.addEventListener('resize', resize); resize();
 
-const TOTAL = 50;
-let state = 'menu'; // menu | playing | win
+// ===================== УРОВНИ (ДНИ ФЕРМЫ) =====================
+const LEVELS = [
+  { day:1, name:'Тёплый денёк',      sheep:18, rebels:0, wolves:0, obstacles:[] },
+  { day:2, name:'Бунтарка в стаде',  sheep:26, rebels:1, wolves:0, obstacles:['bush'] },
+  { day:3, name:'Грязное утро',      sheep:34, rebels:1, wolves:0, obstacles:['puddle','bush'] },
+  { day:4, name:'Волк у фермы',      sheep:42, rebels:2, wolves:1, obstacles:['puddle','hill'] },
+  { day:5, name:'Сущий ад фермера',  sheep:50, rebels:3, wolves:2, obstacles:['puddle','bush','hill'] },
+];
+let levelIdx = 0;
+let TOTAL = 18;            // сколько овец на текущем уровне (стартовое число)
+let state = 'menu';       // menu | playing | levelclear | win
 let startTime = 0, elapsed = 0;
-let poopCount = 0, penned = 0;
+let poopCount = 0, penned = 0, lost = 0;
 
 // Загон (pen) — зона справа. Размер адаптируется под узкие экраны.
 function penRect(){
@@ -242,6 +252,23 @@ function penRect(){
 function hutRect(){
   const w = Math.max(64, Math.min(104, W*0.11));
   return { x: Math.max(16, W*0.05), y: H*0.6, w: w, h: w*0.9 };
+}
+// Препятствия уровня (лужа / куст / горка)
+let obstacles = [];
+function makeObstacles(types){
+  obstacles = [];
+  const pen=penRect(), ht=hutRect();
+  for(const type of (types||[])){
+    let x,y,tries=0;
+    do {
+      x = rnd(W*0.22, W*0.66); y = rnd(H*0.3, H*0.8); tries++;
+    } while(tries<40 && (
+      x > pen.x-90 ||
+      (x>ht.x-70 && x<ht.x+ht.w+70 && y>ht.y-70 && y<ht.y+ht.h+70)
+    ));
+    const r = type==='hill' ? rnd(72,96) : rnd(56,82);
+    obstacles.push({ type, x, y, r });
+  }
 }
 
 // ===================== ЗВУК (Web Audio) =====================
@@ -285,16 +312,21 @@ function sThud(){ tone(90,0.22,'sine',0.35,50); noise(0.13,0.28,500); } // по�
 function sShoo(){ noise(0.18,0.22,2600); tone(440,0.12,'square',0.13,300); } // Володя шикает на овец
 function sRing(){ tone(800,0.4,'sine',0.16); setTimeout(()=>tone(1000,0.4,'sine',0.16),190); } // гудок звонка
 function sDecline(){ tone(420,0.12,'square',0.2,210); setTimeout(()=>tone(200,0.2,'square',0.2,120),110); } // сброс
+function sWolf(){ tone(300,0.5,'sawtooth',0.2,150); setTimeout(()=>tone(390,0.6,'sawtooth',0.17,170),200); } // вой волка
+function sSlip(){ tone(700,0.18,'sine',0.2,200); noise(0.12,0.2,700); } // поскользнулась
 
 // ===================== СУЩНОСТИ =====================
 function rnd(a,b){ return a+Math.random()*(b-a); }
 function dist(ax,ay,bx,by){ return Math.hypot(ax-bx, ay-by); }
 
 class Sheep {
-  constructor(){
+  constructor(opts){
+    opts = opts||{};
+    this.rebel = !!opts.rebel;   // чёрная овца-бунтарка
+    this.captured = false;        // схвачена волком
     this.x = rnd(W*0.18, W*0.55); this.y = rnd(H*0.2, H*0.8);
     this.vx = 0; this.vy = 0;
-    this.r = rnd(13,18);
+    this.r = this.rebel ? rnd(15,19) : rnd(13,18);
     this.penned = false;
     this.legPhase = Math.random()*6;
     this.face = rnd(-1,1)>0?1:-1;
@@ -302,6 +334,7 @@ class Sheep {
     this.fright = 0;
   }
   update(dt, sheep, dog){
+    if(this.captured){ this.legPhase += dt*9; this.fright=1; return; } // в зубах у волка
     if(this.penned){
       // лёгкое топтание в загоне
       this.vx += rnd(-6,6)*dt; this.vy += rnd(-6,6)*dt;
@@ -316,6 +349,16 @@ class Sheep {
       return;
     }
     let ax=0, ay=0;
+    // Препятствия: вязкая лужа / куст-укрытие / горка
+    let inMud=false, inBush=false;
+    for(const ob of obstacles){
+      const od = dist(this.x,this.y,ob.x,ob.y);
+      if(od < ob.r){
+        if(ob.type==='puddle') inMud=true;
+        else if(ob.type==='bush') inBush=true;
+        else if(ob.type==='hill' && this.vy<0) ay += 26; // тяжело идти вверх по горке
+      }
+    }
     // Стадность (boids): притяжение к соседям + выравнивание + разделение
     let cx=0, cy=0, n=0, sepx=0, sepy=0;
     for(const o of sheep){
@@ -324,17 +367,19 @@ class Sheep {
       if(d < 130){
         cx+=o.x; cy+=o.y; n++;
         if(d < 34 && d>0){ sepx+=(this.x-o.x)/d; sepy+=(this.y-o.y)/d; }
+        if(o.rebel && d<72) this.fright = Math.min(1, this.fright + dt*1.4); // бунтарка нервирует соседей
       }
     }
     if(n>0){
       cx/=n; cy/=n;
-      ax += (cx-this.x)*0.012*flock; ay += (cy-this.y)*0.012*flock;
+      const cohK = this.rebel ? -0.016 : 0.012;   // бунтарка убегает от стада
+      ax += (cx-this.x)*cohK*flock; ay += (cy-this.y)*cohK*flock;
       ax += sepx*22; ay += sepy*22;
     }
-    // Реакция на собаку
+    // Реакция на собаку (в кустах овца «прячется» — слабее реагирует)
     if(dog){
       const d = dist(this.x,this.y,dog.x,dog.y);
-      const range = dog.mode==='scatter' ? 220 : 165;
+      const range = (dog.mode==='scatter' ? 220 : 165) * (inBush?0.55:1);
       if(d < range && d>0){
         const force = (range-d)/range;
         let dx=(this.x-dog.x)/d, dy=(this.y-dog.y)/d;
@@ -381,12 +426,22 @@ class Sheep {
         }
       }
     }
+    // Бегство от волков
+    for(const w of wolves){
+      if(w.life<=0) continue;
+      const d=dist(this.x,this.y,w.x,w.y);
+      if(d<155 && d>0){ const f=(155-d)/155;
+        ax += (this.x-w.x)/d*f*320; ay += (this.y-w.y)/d*f*320;
+        this.fright=Math.min(1,this.fright+f*dt*5);
+      }
+    }
 
     this.vx += ax*dt; this.vy += ay*dt;
     const sp = Math.hypot(this.vx,this.vy);
-    const max = this.fright>0.3 ? 320 : 150;
+    let max = this.fright>0.3 ? 320 : (this.rebel?210:150);
+    if(inMud) max *= 0.45;                 // в луже вязнут
     if(sp>max){ this.vx=this.vx/sp*max; this.vy=this.vy/sp*max; }
-    this.vx *= 0.93; this.vy *= 0.93;
+    this.vx *= inMud?0.86:0.93; this.vy *= inMud?0.86:0.93;
     this.x += this.vx*dt; this.y += this.vy*dt;
     if(Math.abs(this.vx)>3) this.face = this.vx>0?1:-1;
     this.legPhase += sp*dt*0.06;
@@ -400,7 +455,7 @@ class Sheep {
     if(this.x>p.x-10 && this.x<p.x+p.w && this.y>p.y && this.y<p.y+p.h){
       this.penned = true; penned++; updateHUD(); sBaa();
       for(let i=0;i<10;i++) confetti.push(new Particle(this.x,this.y,'#7ee37e'));
-      if(penned===TOTAL) win();
+      checkWin();
     }
   }
   draw(){
@@ -418,7 +473,8 @@ class Sheep {
       ctx.lineTo(lx+Math.sin(ph)*3, bodyH*0.4+8); ctx.stroke();
     }
     // шерсть (пушистое тело — несколько кружков)
-    const woolCol = this.fright>0.3 ? '#fff5f5' : '#f4f4ee';
+    const woolCol = this.rebel ? (this.fright>0.3?'#454545':'#2c2c2c')
+                               : (this.fright>0.3 ? '#fff5f5' : '#f4f4ee');
     ctx.fillStyle=woolCol;
     for(let i=0;i<7;i++){
       const a=i/7*Math.PI*2; ctx.beginPath();
@@ -427,12 +483,13 @@ class Sheep {
     ctx.beginPath(); ctx.ellipse(0,0,bodyW*0.55,bodyH*0.5,0,0,7); ctx.fill();
     // голова
     const hx = this.face*bodyW*0.55;
-    ctx.fillStyle='#2b2b2b'; ctx.beginPath(); ctx.ellipse(hx,-bodyH*0.15,this.r*0.42,this.r*0.5,0,0,7); ctx.fill();
+    ctx.fillStyle= this.rebel?'#d6cdbb':'#2b2b2b'; ctx.beginPath(); ctx.ellipse(hx,-bodyH*0.15,this.r*0.42,this.r*0.5,0,0,7); ctx.fill();
     // уши
     ctx.beginPath(); ctx.ellipse(hx-this.face*4,-bodyH*0.4,4,7,this.face*0.5,0,7); ctx.fill();
     // глаз
     ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(hx+this.face*4,-bodyH*0.2,2.6,0,7); ctx.fill();
     ctx.fillStyle='#000'; ctx.beginPath(); ctx.arc(hx+this.face*5,-bodyH*0.2,1.3,0,7); ctx.fill();
+    if(this.rebel){ ctx.fillStyle='#e23a3a'; ctx.beginPath(); ctx.arc(hx+this.face*5,-bodyH*0.2,1.5,0,7); ctx.fill(); } // злой красный глаз
     if(this.fright>0.3){ // испуганные брови
       ctx.strokeStyle='#c33'; ctx.lineWidth=1.5;
       ctx.beginPath(); ctx.moveTo(hx+this.face*2,-bodyH*0.4); ctx.lineTo(hx+this.face*8,-bodyH*0.46); ctx.stroke();
@@ -447,7 +504,8 @@ class Dog {
   setTarget(x,y){ this.tx=x; this.ty=y; }
   update(dt){
     const dx=this.tx-this.x, dy=this.ty-this.y, d=Math.hypot(dx,dy);
-    if(d>4){ this.vx += dx/d*900*dt; this.vy += dy/d*900*dt; }
+    const distract = (typeof callActive!=='undefined' && callActive) ? 0.55 : 1; // звонок отвлекает Бику
+    if(d>4){ this.vx += dx/d*900*distract*dt; this.vy += dy/d*900*distract*dt; }
     this.vx*=0.86; this.vy*=0.86;
     const sp=Math.hypot(this.vx,this.vy);
     this.x+=this.vx*dt; this.y+=this.vy*dt;
@@ -491,8 +549,97 @@ class Dog {
     if(this.barking>0){ ctx.fillStyle='#e36a6a'; ctx.beginPath(); ctx.ellipse(33,2,3,5,0,0,7); ctx.fill(); }
     ctx.restore();
     // подпись «Бика»
+    const dz = (typeof callActive!=='undefined' && callActive) ? ' 📵' : '';
     ctx.fillStyle='rgba(255,255,255,.85)'; ctx.font='bold 12px Segoe UI'; ctx.textAlign='center';
-    ctx.fillText('Бика 🐕', this.x, this.y-26);
+    ctx.fillText('Бика 🐕'+dz, this.x, this.y-26);
+  }
+}
+
+// ===================== ВОЛК =====================
+class Wolf {
+  constructor(){
+    const side = Math.floor(rnd(0,3)); // 0 сверху, 1 снизу, 2 слева
+    if(side===0){ this.x=rnd(W*0.2,W*0.65); this.y=-30; }
+    else if(side===1){ this.x=rnd(W*0.2,W*0.65); this.y=H+30; }
+    else { this.x=-30; this.y=rnd(H*0.25,H*0.75); }
+    this.vx=0; this.vy=0; this.face=1; this.legPhase=0;
+    this.scared=0; this.captive=null; this.life=1; this.state='hunt';
+  }
+  update(dt){
+    if(this.life<=0) return;
+    // Бика отпугивает: лай рядом или подошла вплотную
+    if(dog){
+      const dd=dist(this.x,this.y,dog.x,dog.y);
+      if((dog.barking>0 && dd<300) || dd<80){
+        if(this.scared<=0){
+          this.scared=1.7;
+          if(this.captive){ this.captive.captured=false; this.captive=null; showToast('🐕 Бика отбила овцу!'); }
+        }
+      }
+    }
+    let tx,ty,spd;
+    if(this.scared>0){
+      this.scared-=dt; this.state='flee';
+      tx = this.x<W/2 ? -70 : W+70; ty=this.y; spd=270;
+    } else if(this.captive){
+      this.state='steal';
+      tx = this.x<W/2 ? -70 : W+70; ty=this.y-30; spd=125;
+      this.captive.x = this.x - this.face*20; this.captive.y = this.y+6; this.captive.captured=true;
+    } else {
+      this.state='hunt';
+      let best=null,bd=1e9;
+      for(const s of sheep){ if(s.penned||s.captured) continue;
+        const dd=dist(this.x,this.y,s.x,s.y); if(dd<bd){bd=dd;best=s;} }
+      if(best){ tx=best.x; ty=best.y; spd=168;
+        if(bd<24){ this.captive=best; best.captured=true; sThud(); showToast('🐺 Волк схватил овцу!'); }
+      } else { tx=this.x; ty=this.y; spd=70; }
+    }
+    const dx=tx-this.x, dy=ty-this.y, dd=Math.hypot(dx,dy)||1;
+    this.vx += dx/dd*spd*9*dt; this.vy += dy/dd*spd*9*dt;
+    this.vx*=0.88; this.vy*=0.88;
+    const sp=Math.hypot(this.vx,this.vy); if(sp>spd){ this.vx=this.vx/sp*spd; this.vy=this.vy/sp*spd; }
+    this.x+=this.vx*dt; this.y+=this.vy*dt;
+    if(Math.abs(this.vx)>5) this.face=this.vx>0?1:-1;
+    this.legPhase += sp*dt*0.045;
+    if(sp>140 && Math.random()<dt*2) spawnDust(this.x,this.y+10);
+    // унёс овцу за край → потеря
+    if(this.captive && (this.x<-46||this.x>W+46||this.y<-46||this.y>H+46)){
+      const idx=sheep.indexOf(this.captive); if(idx>=0) sheep.splice(idx,1);
+      this.captive=null; this.life=0; lost++; updateHUD();
+      showToast('🐺 Волк утащил овцу! 😱'); checkWin();
+    }
+    // испуганный волк убежал за край → исчез
+    if(this.scared>0 && (this.x<-60||this.x>W+60)) this.life=0;
+  }
+  draw(){
+    ctx.save(); ctx.translate(this.x,this.y); ctx.scale(this.face,1);
+    ctx.fillStyle='rgba(0,0,0,0.25)'; ctx.beginPath(); ctx.ellipse(0,15,24,7,0,0,7); ctx.fill();
+    // хвост (пушистый, вниз)
+    ctx.strokeStyle='#555'; ctx.lineWidth=7; ctx.lineCap='round';
+    ctx.beginPath(); ctx.moveTo(-20,-2); ctx.quadraticCurveTo(-36,4+Math.sin(this.legPhase*2)*4,-32,16); ctx.stroke();
+    // ноги
+    ctx.strokeStyle='#3a3a3a'; ctx.lineWidth=4;
+    for(let i=0;i<4;i++){ const lx=(i<2?-1:1)*12; const ph=this.legPhase*1.4+i*1.5;
+      ctx.beginPath(); ctx.moveTo(lx,7); ctx.lineTo(lx+Math.sin(ph)*4,18); ctx.stroke(); }
+    // тело
+    ctx.fillStyle='#6a6a72'; ctx.beginPath(); ctx.ellipse(0,0,25,13,0,0,7); ctx.fill();
+    ctx.fillStyle='#888'; ctx.beginPath(); ctx.ellipse(2,6,17,6,0,0,7); ctx.fill();
+    // голова
+    ctx.fillStyle='#6a6a72'; ctx.beginPath(); ctx.ellipse(21,-7,13,11,0,0,7); ctx.fill();
+    // острые уши
+    ctx.fillStyle='#5a5a62'; ctx.beginPath(); ctx.moveTo(13,-16); ctx.lineTo(17,-26); ctx.lineTo(21,-15); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(22,-15); ctx.lineTo(26,-25); ctx.lineTo(29,-14); ctx.fill();
+    // морда
+    ctx.fillStyle='#4a4a52'; ctx.beginPath(); ctx.ellipse(32,-4,8,5,0,0,7); ctx.fill();
+    ctx.fillStyle='#111'; ctx.beginPath(); ctx.arc(38,-5,2.4,0,7); ctx.fill();
+    // злой жёлтый глаз
+    ctx.fillStyle='#ffd24a'; ctx.beginPath(); ctx.ellipse(24,-9,3,2.4,0,0,7); ctx.fill();
+    ctx.fillStyle='#111'; ctx.beginPath(); ctx.arc(25,-9,1.2,0,7); ctx.fill();
+    // оскал
+    ctx.fillStyle='#fff'; ctx.beginPath(); ctx.moveTo(28,1); ctx.lineTo(31,5); ctx.lineTo(33,1); ctx.fill();
+    ctx.restore();
+    ctx.fillStyle='rgba(255,180,180,.9)'; ctx.font='bold 12px Segoe UI'; ctx.textAlign='center';
+    ctx.fillText('Волк 🐺', this.x, this.y-26);
   }
 }
 
@@ -551,6 +698,10 @@ class Farmer {
       for(const p of poops){
         if(!p.stepped && dist(this.x,this.y+18,p.x,p.y)<14){ p.stepped=true; this.fall('poop'); break; }
       }
+      // 4) поскользнулась в луже
+      for(const ob of obstacles){
+        if(ob.type==='puddle' && dist(this.x,this.y+12,ob.x,ob.y)<ob.r*0.7 && Math.random()<dt*0.5){ this.fall('slip'); break; }
+      }
     }
   }
   fall(reason){
@@ -561,6 +712,7 @@ class Farmer {
     let col='#6b4a1a';
     if(reason==='fence'){ sCrash(); showToast('🚧 Наташу придавило забором! 😵'); col='#9a6a3a'; }
     else if(reason==='sheep'){ sThud(); showToast('🐑 Наташу повалили овцы! 😩'); col='#f4f4ee'; }
+    else if(reason==='slip'){ sSlip(); showToast('🌊 Наташа поскользнулась в луже! 💦'); col='#6aa0d0'; }
     else { sSplat(); showToast('💩 Наташа упала в навоз! 🙀'); }
     for(let i=0;i<18;i++) confetti.push(new Particle(this.x,this.y+15,col));
   }
@@ -680,20 +832,44 @@ function spawnDust(x,y){ for(let i=0;i<3;i++){ const p=new Particle(x,y,'rgba(20
 function spawnSmoke(x,y){ const p=new Particle(x,y,'rgba(205,205,205,0.5)'); p.vx=rnd(-10,10); p.vy=rnd(-26,-12); p.g=-18; p.r=rnd(3,5); p.life=1.3; confetti.push(p); }
 
 // ===================== МИР =====================
-let sheep=[], dog=null, farmers=[], poops=[], confetti=[], ring=[];
+let sheep=[], dog=null, farmers=[], poops=[], confetti=[], ring=[], wolves=[];
 let flock = 1; // множитель стадности (зависит от режима собаки)
+let wolfTimer = 99;
 
-function initWorld(){
-  sheep=[]; for(let i=0;i<TOTAL;i++) sheep.push(new Sheep());
+function initWorld(lv){
+  lv = lv || LEVELS[levelIdx];
+  sheep=[];
+  for(let i=0;i<lv.sheep;i++) sheep.push(new Sheep({ rebel: i<lv.rebels }));
   dog = new Dog();
   farmers = [
     new Farmer('Володя', W*0.25, H*0.35, '#2a6a3a'),
     new Farmer('Наташа', W*0.4, H*0.6, '#b04a7a'),
   ];
+  wolves=[]; makeObstacles(lv.obstacles);
   poops=[]; confetti=[]; ring=[];
-  penned=0; poopCount=0; startTime=performance.now(); elapsed=0;
+  penned=0; poopCount=0; lost=0; startTime=performance.now(); elapsed=0;
+  wolfTimer = rnd(8,14);
   resetCall();
   updateHUD();
+}
+
+// появление волков по конфигу уровня
+function wolfTick(dt){
+  const lv=LEVELS[levelIdx];
+  if(!lv.wolves) return;
+  wolfTimer-=dt;
+  const alive=wolves.filter(w=>w.life>0).length;
+  if(wolfTimer<=0 && alive<lv.wolves){
+    wolves.push(new Wolf()); wolfTimer=rnd(13,20);
+    sWolf(); showToast('🐺 Волк вышел на охоту!');
+  }
+}
+
+// проверка прохождения уровня: все оставшиеся овцы в загоне
+function checkWin(){
+  if(state!=='playing') return;
+  let unpenned=0; for(const s of sheep) if(!s.penned) unpenned++;
+  if(unpenned===0 && sheep.length>0) levelClear();
 }
 
 // ===================== ОТРИСОВКА ФОНА =====================
@@ -714,6 +890,27 @@ function drawBackground(){
     const x=(i*317.1)%W, y=(i*191.7+50)%H;
     ctx.fillStyle = i%3===0?'#ffe28a':(i%3===1?'#fff':'#ff9ed0');
     ctx.beginPath(); ctx.arc(x,y,2.5,0,7); ctx.fill();
+  }
+  // Препятствия (под сущностями)
+  for(const ob of obstacles){
+    ctx.save(); ctx.translate(ob.x,ob.y);
+    if(ob.type==='puddle'){
+      ctx.fillStyle='rgba(55,85,115,0.5)'; ctx.beginPath(); ctx.ellipse(0,0,ob.r,ob.r*0.6,0,0,7); ctx.fill();
+      ctx.fillStyle='rgba(120,165,205,0.4)'; ctx.beginPath(); ctx.ellipse(-ob.r*0.18,-ob.r*0.14,ob.r*0.55,ob.r*0.3,0,0,7); ctx.fill();
+      ctx.fillStyle='rgba(255,255,255,0.2)'; ctx.beginPath(); ctx.ellipse(ob.r*0.28,ob.r*0.12,ob.r*0.16,ob.r*0.08,0,0,7); ctx.fill();
+    } else if(ob.type==='hill'){
+      ctx.fillStyle='rgba(66,116,52,0.65)'; ctx.beginPath(); ctx.ellipse(0,ob.r*0.18,ob.r,ob.r*0.5,0,0,7); ctx.fill();
+      ctx.fillStyle='rgba(88,148,68,0.6)'; ctx.beginPath(); ctx.ellipse(0,0,ob.r*0.72,ob.r*0.4,0,0,7); ctx.fill();
+      ctx.fillStyle='rgba(112,176,86,0.55)'; ctx.beginPath(); ctx.ellipse(0,-ob.r*0.14,ob.r*0.42,ob.r*0.24,0,0,7); ctx.fill();
+    } else if(ob.type==='bush'){
+      ctx.fillStyle='rgba(28,66,28,0.9)';
+      for(let i=0;i<6;i++){ const a=i/6*Math.PI*2;
+        ctx.beginPath(); ctx.arc(Math.cos(a)*ob.r*0.55,Math.sin(a)*ob.r*0.4,ob.r*0.42,0,7); ctx.fill(); }
+      ctx.beginPath(); ctx.ellipse(0,0,ob.r*0.72,ob.r*0.55,0,0,7); ctx.fill();
+      ctx.fillStyle='#e34a4a';
+      for(let i=0;i<5;i++){ ctx.beginPath(); ctx.arc(Math.cos(i*1.7)*ob.r*0.45,Math.sin(i*2.3)*ob.r*0.35,2,0,7); ctx.fill(); }
+    }
+    ctx.restore();
   }
   // Загон справа
   const p=penRect();
@@ -779,6 +976,9 @@ function loop(now){
     dog.update(dt);
     for(const s of sheep) s.update(dt, sheep, dog);
     for(const f of farmers) f.update(dt);
+    wolfTick(dt);
+    for(const w of wolves) w.update(dt);
+    if(wolves.some(w=>w.life<=0)) wolves = wolves.filter(w=>w.life>0);
     poops.forEach(p=>p.age+=dt);
     callTick(dt);
     document.getElementById('timer').textContent = elapsed.toFixed(1);
@@ -791,7 +991,7 @@ function loop(now){
     ctx.strokeStyle=`rgba(255,255,255,${Math.max(0,r.life)*0.6})`; ctx.lineWidth=4;
     ctx.beginPath(); ctx.arc(r.x,r.y,r.r,0,7); ctx.stroke(); if(r.life<=0) ring.splice(i,1); }
   // сортировка по y для глубины
-  const ents = [...sheep, ...farmers, dog].filter(Boolean).sort((a,b)=>a.y-b.y);
+  const ents = [...sheep, ...farmers, ...wolves, dog].filter(Boolean).sort((a,b)=>a.y-b.y);
   for(const e of ents) e.draw();
   // частицы
   for(let i=confetti.length-1;i>=0;i--){ const p=confetti[i]; p.update(dt); p.draw(); if(p.life<=0) confetti.splice(i,1); }
@@ -803,10 +1003,13 @@ requestAnimationFrame(loop);
 // ===================== HUD / UI =====================
 function updateHUD(){
   document.getElementById('penned').textContent=penned;
+  document.getElementById('total').textContent=TOTAL;
   document.getElementById('poopCount').textContent=poopCount;
-  document.getElementById('goalfill').style.width=(penned/TOTAL*100)+'%';
+  const active=Math.max(1,TOTAL-lost);
+  document.getElementById('goalfill').style.width=Math.min(100,penned/active*100)+'%';
+  document.getElementById('dayLabel').textContent='День '+LEVELS[levelIdx].day;
+  document.getElementById('lostInfo').textContent = lost? ' 🐺−'+lost : '';
 }
-document.getElementById('total').textContent=TOTAL;
 
 let toastTimer=null;
 function showToast(txt){
@@ -904,12 +1107,38 @@ function resetCall(){
 document.getElementById('callDecline').onclick=()=>endCall('decline');
 document.getElementById('callAccept').onclick=()=>endCall('accept');
 
-function startGame(){
+function startGame(){      // старт новой игры с первого дня
   initAudio();
+  levelIdx=0;
+  startLevel();
+}
+function startLevel(){
+  const lv=LEVELS[levelIdx];
+  TOTAL=lv.sheep;
   document.getElementById('overlay').classList.add('hidden');
-  initWorld();
+  initWorld(lv);
   state='playing';
-  showToast('🐕 Вперёд, Бика!');
+  showToast(`🌅 День ${lv.day}: ${lv.name}`);
+}
+function levelClear(){
+  if(levelIdx >= LEVELS.length-1){ win(); return; }
+  state='levelclear'; resetCall(); sWin();
+  for(let k=0;k<26;k++) setTimeout(()=>{ const x=rnd(W*0.2,W*0.8),y=rnd(H*0.2,H*0.5);
+    for(let i=0;i<12;i++){ const p=new Particle(x,y,`hsl(${rnd(70,150)},85%,60%)`); p.g=200; confetti.push(p);} }, k*55);
+  const lv=LEVELS[levelIdx], nx=LEVELS[levelIdx+1];
+  const ov=document.getElementById('overlay');
+  ov.innerHTML=`
+    <div class="emoji">🌅🐑</div>
+    <h1>День ${lv.day} пройден!</h1>
+    <div class="sub">
+      «${lv.name}» — всё стадо в загоне! 🎉<br>
+      ⏱ ${elapsed.toFixed(1)}с &nbsp; 🤕 Наташа падала: ${poopCount}${lost?` &nbsp; 🐺 потеряно: ${lost}`:''}<br><br>
+      <b>День ${nx.day}: «${nx.name}»</b><br>
+      🐑 ${nx.sheep} овец${nx.rebels?` · 🐑‍⬛ бунтарок ${nx.rebels}`:''}${nx.wolves?` · 🐺 волков ${nx.wolves}`:''}${nx.obstacles.length?` · преграды: ${nx.obstacles.map(o=>o==='puddle'?'🌊':o==='bush'?'🌳':'⛰').join(' ')}`:''}
+    </div>
+    <button id="startBtn">▶ Следующий день</button>`;
+  ov.classList.remove('hidden');
+  ov.querySelector('#startBtn').onclick=()=>{ levelIdx++; startLevel(); };
 }
 document.getElementById('startBtn').onclick=startGame;
 
@@ -932,12 +1161,12 @@ function win(){
   const ov=document.getElementById('overlay');
   ov.innerHTML=`
     <div class="emoji">🎉🐑🏆</div>
-    <h1>Все 50 овец в загоне!</h1>
+    <h1>Все 5 дней пройдены!</h1>
     <div class="sub">
-      Бика — лучшая овчарка! 🐕<br>
-      ⏱ Время: <b>${elapsed.toFixed(1)} сек</b><br>
-      💩 Наташа падала в навоз: <b>${poopCount} раз</b><br>
-      Володя доволен, Наташа идёт в душ. 🚿
+      Бика — легендарная овчарка фермы! 🐕🏅<br>
+      Последний день — за <b>${elapsed.toFixed(1)} сек</b>${lost?`, потеряно волкам: <b>${lost}</b>`:' без потерь!'}<br>
+      🤕 Наташа падала за день: <b>${poopCount}</b> раз<br>
+      Володя бросил курить (почти), Наташа — в душ. 🚿
     </div>
     <button id="startBtn">▶ Играть снова</button>`;
   ov.classList.remove('hidden');
