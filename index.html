@@ -384,6 +384,7 @@ class Sheep {
       }
       this.vx*=0.9; this.vy*=0.9;
       this.x+=this.vx*dt*60; this.y+=this.vy*dt*60;
+      this.x=Math.max(this.r,Math.min(W-this.r,this.x)); this.y=Math.max(this.r,Math.min(H-this.r,this.y));
       this.legPhase += (Math.abs(this.vx)+Math.abs(this.vy))*dt*2;
       return;
     }
@@ -444,9 +445,12 @@ class Sheep {
     this.fright *= (1-dt*0.8);
     // Лёгкое блуждание
     ax += rnd(-8,8); ay += rnd(-8,8);
-    // Границы поля
-    if(this.x<this.r) ax+=80; if(this.x>W-this.r) ax-=80;
-    if(this.y<this.r+10) ay+=80; if(this.y>H-this.r-10) ay-=80;
+    // Границы поля: сила растёт с заходом за край (на 32px = 320, гасит любой испуг)
+    const Mx=this.r, Myt=this.r+10, Myb=this.r+6;
+    if(this.x<Mx) ax += (Mx-this.x)*10;
+    else if(this.x>W-Mx) ax -= (this.x-(W-Mx))*10;
+    if(this.y<Myt) ay += (Myt-this.y)*10;
+    else if(this.y>H-Myb) ay -= (this.y-(H-Myb))*10;
 
     // Обход тренерского домика
     const ht=hutRect(), hcx=ht.x+ht.w/2, hcy=ht.y+ht.h*0.7;
@@ -482,6 +486,11 @@ class Sheep {
     if(sp>max){ this.vx=this.vx/sp*max; this.vy=this.vy/sp*max; }
     this.vx *= inMud?0.86:0.93; this.vy *= inMud?0.86:0.93;
     this.x += this.vx*dt; this.y += this.vy*dt;
+    // жёсткая страховка: овца физически не покидает экран
+    if(this.x<this.r){ this.x=this.r; if(this.vx<0) this.vx*=-0.4; }
+    else if(this.x>W-this.r){ this.x=W-this.r; if(this.vx>0) this.vx*=-0.4; }
+    if(this.y<this.r+4){ this.y=this.r+4; if(this.vy<0) this.vy*=-0.4; }
+    else if(this.y>H-this.r){ this.y=H-this.r; if(this.vy>0) this.vy*=-0.4; }
     if(Math.abs(this.vx)>3) this.face = this.vx>0?1:-1;
     this.legPhase += sp*dt*0.06;
 
@@ -540,14 +549,17 @@ class Sheep {
 class Dog {
   constructor(){ this.x=W*0.3; this.y=H*0.5; this.vx=0; this.vy=0; this.mode='herd';
     this.barking=0; this.legPhase=0; this.face=1; this.tx=this.x; this.ty=this.y; }
-  setTarget(x,y){ this.tx=x; this.ty=y; }
+  setTarget(x,y){ this.tx=Math.max(14,Math.min(W-14,x)); this.ty=Math.max(14,Math.min(H-14,y)); }
   update(dt){
+    // держим цель в пределах экрана (на случай resize/смены ориентации)
+    this.tx=Math.max(14,Math.min(W-14,this.tx)); this.ty=Math.max(14,Math.min(H-14,this.ty));
     const dx=this.tx-this.x, dy=this.ty-this.y, d=Math.hypot(dx,dy);
     const distract = (typeof callActive!=='undefined' && callActive) ? 0.55 : 1; // звонок отвлекает Бику
     if(d>4){ this.vx += dx/d*900*distract*dt; this.vy += dy/d*900*distract*dt; }
     this.vx*=0.86; this.vy*=0.86;
     const sp=Math.hypot(this.vx,this.vy);
     this.x+=this.vx*dt; this.y+=this.vy*dt;
+    this.x=Math.max(14,Math.min(W-14,this.x)); this.y=Math.max(14,Math.min(H-14,this.y)); // не покидать экран
     if(Math.abs(this.vx)>5) this.face=this.vx>0?1:-1;
     this.legPhase += sp*dt*0.05;
     if(this.barking>0) this.barking-=dt;
@@ -696,6 +708,9 @@ class Farmer {
     this.goingFence = false;
   }
   update(dt){
+    // держим фермера и его цель в пределах экрана (resize-страховка)
+    this.x=Math.max(14,Math.min(W-14,this.x)); this.y=Math.max(14,Math.min(H-14,this.y));
+    this.tx=Math.max(14,Math.min(W-14,this.tx)); this.ty=Math.max(14,Math.min(H-14,this.ty));
     this.wander-=dt;
     if(this.wander<=0 && this.fallen<=0 && !this.goingFence){
       this.tx = rnd(W*0.12,W*0.6); this.ty=rnd(H*0.2,H*0.85); this.wander=rnd(3,7);
